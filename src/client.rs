@@ -8,12 +8,14 @@ use slog_stdlog;
 use slog::Drain;
 
 use websocket::client::ClientBuilder;
+use serde_json::value::Value;
 
 use receiver::Receiver;
 use sender::Sender;
 use error::ConnectError;
 use message::Message;
 use error::{JoinError, MessageError};
+use event::EventKind;
 
 type MessageResult = Result<Message, MessageError>;
 
@@ -95,6 +97,11 @@ impl Client {
         };
 
         return Ok((client, rx));
+    }
+
+    pub fn send(&mut self, topic: &str, event: EventKind, message: &Value) {
+        let mut sender = self.sender_ref.lock().unwrap();
+        sender.send(topic, event, message);
     }
 
     fn keepalive(sender_ref: Arc<Mutex<Sender>>) -> thread::JoinHandle<()> {

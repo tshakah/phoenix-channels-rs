@@ -4,9 +4,10 @@ use serde_json;
 use websocket::OwnedMessage;
 use websocket::sender::Writer;
 use websocket::stream::sync::TcpStream;
+use serde_json::value::Value;
 
 use error::{JoinError, MessageError};
-
+use event::EventKind;
 
 pub struct Sender
 {
@@ -48,6 +49,19 @@ impl Sender {
 
         let serialised = serde_json::to_string(&phx_message)?;
         debug!(self.logger, "heartbeat()"; "payload" => &serialised);
+        let message = OwnedMessage::Text(serialised);
+
+        self.writer.send_message(&message)?;
+        return Ok(self.message_ref);
+    }
+
+    pub fn send(&mut self, topic: &str, event: EventKind, message: &Value) -> Result<(u32), MessageError> {
+        let phx_message = json!([(), self.message_ref, topic, event, message]);
+
+        self.message_ref += 1;
+
+        let serialised = serde_json::to_string(&phx_message)?;
+        debug!(self.logger, "sent()"; "payload" => &serialised);
         let message = OwnedMessage::Text(serialised);
 
         self.writer.send_message(&message)?;
