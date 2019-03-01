@@ -11,6 +11,7 @@ pub enum EventKind {
     Join,
     Leave,
     Reply,
+    Custom(String)
 }
 
 
@@ -36,7 +37,7 @@ impl<'de> Deserialize<'de> for EventKind {
                     "phx_join" => Ok(EventKind::Join),
                     "phx_leave" => Ok(EventKind::Leave),
                     "phx_reply" => Ok(EventKind::Reply),
-                    s => Err(E::invalid_value(Unexpected::Str(s), &self)),
+                    msg => Ok(EventKind::Custom(msg.to_string())),
                 }
             }
         }
@@ -56,6 +57,7 @@ impl Serialize for EventKind {
             EventKind::Join => "phx_join",
             EventKind::Leave => "phx_leave",
             EventKind::Reply => "phx_reply",
+            EventKind::Custom(ref msg) => &msg,
         };
 
         serializer.serialize_str(kind)
