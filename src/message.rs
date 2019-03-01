@@ -10,7 +10,7 @@ use error::MessageError;
 pub struct PhoenixMessage
 {
     join_ref: Option<u32>,
-    message_ref: u32,
+    message_ref: Option<u32>,
     topic: String,
     event: EventKind,
     payload: serde_json::Value,
