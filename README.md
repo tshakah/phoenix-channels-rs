@@ -1,3 +1,5 @@
+NOTE: the examples below haven't been updated to work with the new (SSL-capable) code.
+
 # phoenix-channels-rs
 
 A Rust library providing functionality to connect to a phoenix channel.
