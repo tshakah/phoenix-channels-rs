@@ -1,6 +1,5 @@
 use serde_json;
 use websocket::OwnedMessage;
-use websocket::result::WebSocketResult;
 
 use event::EventKind;
 use error::MessageError;
@@ -40,7 +39,7 @@ impl Message {
         return Ok(message);
     }
 
-    pub fn from_result(result: WebSocketResult<OwnedMessage>) -> Result<Self, MessageError> {
-        return Message::from_owned(result?);
+    pub fn from_result(result: OwnedMessage) -> Result<Self, MessageError> {
+        return Message::from_owned(result);
     }
 }

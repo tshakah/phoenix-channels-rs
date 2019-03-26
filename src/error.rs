@@ -2,12 +2,21 @@ use std::io;
 use serde_json;
 use websocket::result::WebSocketError;
 use websocket::client::ParseError;
+use websocket::futures::sync::mpsc::SendError;
+use websocket::OwnedMessage;
 
 
 #[derive(Debug)]
 pub enum MessageError {
+    SendError(SendError<OwnedMessage>),
     WebSocket(WebSocketError),
     Json(serde_json::Error),
+}
+
+impl From<SendError<OwnedMessage>> for MessageError {
+    fn from(e: SendError<OwnedMessage>) -> Self {
+        return MessageError::SendError(e);
+    }
 }
 
 impl From<WebSocketError> for MessageError {
@@ -51,8 +60,15 @@ impl From<io::Error> for ConnectError {
 
 #[derive(Debug)]
 pub enum JoinError {
+    SendError(SendError<OwnedMessage>),
     WebSocket(WebSocketError),
     Json(serde_json::Error),
+}
+
+impl From<SendError<OwnedMessage>> for JoinError {
+    fn from(e: SendError<OwnedMessage>) -> Self {
+        return JoinError::SendError(e);
+    }
 }
 
 impl From<serde_json::Error> for JoinError {
@@ -64,5 +80,15 @@ impl From<serde_json::Error> for JoinError {
 impl From<WebSocketError> for JoinError {
     fn from(e: WebSocketError) -> Self {
         return JoinError::WebSocket(e);
+    }
+}
+
+impl From<MessageError> for JoinError {
+    fn from(error: MessageError) -> Self {
+        match error {
+            MessageError::SendError(e) => JoinError::SendError(e),
+            MessageError::WebSocket(e) => JoinError::WebSocket(e),
+            MessageError::Json(e) => JoinError::Json(e),
+        }
     }
 }

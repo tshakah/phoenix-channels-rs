@@ -1,7 +1,6 @@
 use std::thread;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc;
 
 use slog;
 use slog_stdlog;
@@ -15,9 +14,15 @@ use sender::Sender;
 use error::ConnectError;
 use message::Message;
 use error::{JoinError, MessageError};
+use std::io::{Error, ErrorKind};
 use event::EventKind;
 
-type MessageResult = Result<Message, MessageError>;
+use websocket::futures::sync::mpsc;
+use websocket::futures::Future;
+use websocket::futures::Stream;
+use websocket::futures::Sink;
+
+pub type MessageResult = Result<Message, MessageError>;
 
 
 const PHOENIX_VERSION: &str = "2.0.0";
@@ -47,6 +52,10 @@ impl From<JoinError> for ClientError {
 pub fn connect(url: &str, params: Vec<(&str, &str)>, logger: Option<slog::Logger>) -> Result<(Sender, Receiver), ConnectError> {
     let logger = logger.unwrap_or(slog::Logger::root(slog_stdlog::StdLog.fuse(), o!()));
 
+    // create a channel to send data to the socket
+    let (to_socket, from_lib) = mpsc::channel(10);
+    let (to_lib, from_socket) = mpsc::channel(10);
+
     // convert the params to a uri component string
     let mut params_uri: String = "".to_owned();
     for (k, v) in params {
@@ -57,13 +66,38 @@ pub fn connect(url: &str, params: Vec<(&str, &str)>, logger: Option<slog::Logger
     // phoenix socket endpoints always have /websocket appended for the socket route
     // it also adds the vsn parameter for versioning
     let addr = format!("{}/websocket?vsn={}{}", url, PHOENIX_VERSION, params_uri);
-    let mut client_builder = ClientBuilder::new(&addr)?;
 
-    let socket_client = client_builder.connect_insecure()?;
-    let (reader, writer) = socket_client.split()?;
+    println!("{:?}", addr);
 
-    let sender = Sender::new(writer, logger.new(o!("type" => "sender")));
-    let receiver = Receiver::new(reader, logger.new(o!("type" => "receiver")));
+    let connection = ClientBuilder::new(&addr)
+        .unwrap()
+        .async_connect(None)
+        .map(|(duplex, _)| duplex.split())
+        .and_then(|(sink, stream)| {
+            let sink_handle = thread::spawn(move || {
+                sink
+                    .send_all(from_lib.map_err(|_e| Error::new(ErrorKind::Other, "Sink receiver error")))
+                    .map(|_| ()).wait().unwrap();
+            });
+
+            let stream_handle = thread::spawn(move || {
+                stream
+                    .for_each(|i| {
+                        let sender = to_lib.clone();
+                        let msg = Message::from_result(i).unwrap();
+
+                        sender.send(msg).wait().unwrap();
+                        Ok(())
+                    }).wait().unwrap();
+            });
+
+            Ok((sink_handle, stream_handle))
+        });
+
+    let (sink_handle, stream_handle) = connection.wait()?;
+
+    let sender = Sender::new(to_socket, sink_handle, logger.new(o!("type" => "sender")));
+    let receiver = Receiver::new(from_socket, stream_handle, logger.new(o!("type" => "receiver")));
 
     return Ok((sender, receiver));
 }
@@ -73,30 +107,25 @@ pub struct Client {
     logger: slog::Logger,
     sender_ref: Arc<Mutex<Sender>>,
     heartbeat_handle: thread::JoinHandle<()>,
-    message_processor_handle: thread::JoinHandle<()>,
 }
 
 impl Client {
-    pub fn new(url: &str, params: Vec<(&str, &str)>, logger: Option<slog::Logger>) -> Result<(Client, mpsc::Receiver<MessageResult>), ClientError> {
+    pub fn new(url: &str, params: Vec<(&str, &str)>, logger: Option<slog::Logger>) -> Result<(Client, mpsc::Receiver<Message>), ClientError> {
         let logger = logger.unwrap_or(slog::Logger::root(slog_stdlog::StdLog.fuse(), o!()));
         debug!(logger, "creating client"; "url" => url);
 
         let (sender, receiver) = connect(url, params, Some(logger.clone()))?;
 
-        let (tx, rx) = mpsc::channel();
-
         let sender_ref = Arc::new(Mutex::new(sender));
         let heartbeat = Client::keepalive(Arc::clone(&sender_ref));
-        let message_processor = Client::process_messages(receiver, tx);
 
         let client = Client {
             logger: logger,
             sender_ref: sender_ref,
             heartbeat_handle: heartbeat,
-            message_processor_handle: message_processor,
         };
 
-        return Ok((client, rx));
+        return Ok((client, receiver.reader));
     }
 
     pub fn send(&mut self, topic: &str, event: EventKind, message: &Value) {
@@ -115,19 +144,6 @@ impl Client {
         });
     }
 
-    fn process_messages(receiver: Receiver, sender: mpsc::Sender<MessageResult>) -> thread::JoinHandle<()> {
-        return thread::spawn(move || {
-            for message in MessageIterator::new(receiver) {
-                let result = sender.send(message);
-
-                // exit the thread cleanly if the channel is closed
-                if result.is_err() {
-                    break;
-                }
-            }
-        });
-    }
-
     pub fn join(&self, channel: &str) -> Result<u32, ClientError> {
         return match self.sender_ref.lock() {
             Ok(mut sender) => Ok(sender.join(channel)?),
@@ -137,29 +153,7 @@ impl Client {
 
     pub fn join_threads(self) -> thread::Result<()> {
         self.heartbeat_handle.join()?;
-        self.message_processor_handle.join()?;
-        return Ok(());
-    }
-}
 
-
-pub struct MessageIterator
-{
-    receiver: Receiver,
-}
-
-impl MessageIterator {
-    pub fn new(receiver: Receiver) -> MessageIterator {
-        MessageIterator {
-            receiver: receiver,
-        }
-    }
-}
-
-impl Iterator for MessageIterator {
-    type Item = MessageResult;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        return self.receiver.next();
+        Ok(())
     }
 }
