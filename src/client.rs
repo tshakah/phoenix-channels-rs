@@ -24,6 +24,10 @@ use websocket::futures::Sink;
 
 pub type MessageResult = Result<Message, MessageError>;
 
+pub trait ClientSender {
+    fn send(&mut self, topic: &str, event: EventKind, message: &Value);
+}
+
 
 const PHOENIX_VERSION: &str = "2.0.0";
 
@@ -128,11 +132,6 @@ impl Client {
         return Ok((client, receiver.reader));
     }
 
-    pub fn send(&mut self, topic: &str, event: EventKind, message: &Value) {
-        let mut sender = self.sender_ref.lock().unwrap();
-        sender.send(topic, event, message);
-    }
-
     fn keepalive(sender_ref: Arc<Mutex<Sender>>) -> thread::JoinHandle<()> {
         return thread::spawn(move || {
             loop {
@@ -155,5 +154,12 @@ impl Client {
         self.heartbeat_handle.join()?;
 
         Ok(())
+    }
+}
+
+impl ClientSender for Client {
+    fn send(&mut self, topic: &str, event: EventKind, message: &Value) {
+        let mut sender = self.sender_ref.lock().unwrap();
+        sender.send(topic, event, message);
     }
 }
