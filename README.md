@@ -19,11 +19,19 @@ processed incoming messages. This allows for messages to be received in a separa
 An very basic example of connecting with the `Client`:
 
 ```rust
-use std::thread;
-
+extern crate futures;
+extern crate tokio_core;
 extern crate phoenix_channels;
-use phoenix_channels::client;
 
+use std::thread;
+use std::time::Duration;
+use futures::stream::Stream;
+use tokio_core::reactor::Core;
+use serde_json::json;
+
+use phoenix_channels::client;
+use phoenix_channels::client::ClientSender;
+use phoenix_channels::event;
 
 let url = "ws://localhost:4000/socket";
 
@@ -32,13 +40,25 @@ let params = vec![("token", token)];
 
 let (client, messages) = client::Client::new(url, params, None).unwrap();
 
+let topic = "room:lobby";
+client.join(topic).unwrap();
+
 thread::spawn(move || {
-    for message in messages {
-        println!("{:?}", message);
-    }
+  loop {
+    thread::sleep(Duration::from_secs(10));
+    let msg = json!({"id": 1});
+    client.send(topic, event::EventKind::Custom(String::from("shout")), &msg);
+  }
 });
 
-client.join("room:lobby").unwrap();
+let runner = messages.for_each(|message| {
+  println!("{:?}", message);
+
+  Ok(())
+});
+
+let mut core = Core::new().unwrap();
+core.run(runner).unwrap();
 ```
 
 The client itself will handle the heartbeat and anything else required to deliver a serde json struct
@@ -57,11 +77,18 @@ actually uses these under the hood).
 Here is an example of how one can use the `Sender`/`Receiver` structs themselves:
 
 ```rust
+extern crate futures;
+extern crate tokio_core;
+extern crate phoenix_channels;
+
 use std::thread;
 use std::time::Duration;
+use futures::stream::Stream;
+use tokio_core::reactor::Core;
+use serde_json::json;
 
-extern crate phoenix_channels;
 use phoenix_channels::client;
+use phoenix_channels::event;
 
 let url = "ws://localhost:4000/socket";
 
@@ -70,19 +97,40 @@ let params = vec![("token", token)];
 
 let (mut sender, receiver) = client::connect(url, params, None).unwrap();
 
-sender.join("room:lobby").unwrap();
+let topic = "room:lobby";
+sender.join(topic).unwrap();
 
-// create a heartbeat thread
+let sender_ref = Arc::new(Mutex::new(sender));
+let sender_heartbeat = Arc::clone(&sender_ref);
+let sender_send = Arc::clone(&sender_ref);
+
 thread::spawn(move || {
-    loop {
-        sender.heartbeat().unwrap();
-        thread::sleep(Duration::from_secs(2));
-    }
+  loop {
+      thread::sleep(Duration::from_secs(2));
+      // if the mutex is poisoned then the whole thread wont work
+      let mut sender = sender_heartbeat.lock().unwrap();
+      sender.heartbeat().expect("could not send heartbeat");
+  }
 });
 
-for message in receiver {
-    println!("{:?}", message);
-}
+thread::spawn(move || {
+  loop {
+      thread::sleep(Duration::from_secs(10));
+      // if the mutex is poisoned then the whole thread wont work
+      let msg = json!({"id": 1});
+      let mut sender = sender_send.lock().unwrap();
+      sender.send(topic, event::EventKind::Custom(String::from("shout")), &msg).expect("could not send message");
+  }
+});
+
+let runner = receiver.reader.for_each(|message| {
+  println!("{:?}", message);
+
+  Ok(())
+});
+
+let mut core = Core::new().unwrap();
+core.run(runner).unwrap();
 ```
 
 Using the lower level API requires more work but it gives you full control over the threading and flow of
