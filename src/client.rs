@@ -136,9 +136,9 @@ impl Client {
         return thread::spawn(move || {
             loop {
                 thread::sleep(Duration::from_secs(2));
-                // if the mutex is poisoned then the whole thread wont work
+                // if the mutex is poisoned then the whole thread won't work
                 let mut sender = sender_ref.lock().unwrap();
-                sender.heartbeat();
+                sender.heartbeat().unwrap();
             }
         });
     }
@@ -160,6 +160,6 @@ impl Client {
 impl ClientSender for Client {
     fn send(&mut self, topic: &str, event: EventKind, message: &Value) {
         let mut sender = self.sender_ref.lock().unwrap();
-        sender.send(topic, event, message);
+        sender.send(topic, event, message).unwrap();
     }
 }

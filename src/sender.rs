@@ -46,7 +46,7 @@ impl Sender {
         return Ok(self.join_ref);
     }
 
-    pub fn heartbeat(&mut self) -> Result<(u32), MessageError> {
+    pub fn heartbeat(&mut self) -> Result<u32, MessageError> {
         let phx_message = json!([(), self.message_ref, "phoenix", "heartbeat", {}]);
 
         let serialised = serde_json::to_string(&phx_message)?;
@@ -56,7 +56,7 @@ impl Sender {
         self.actually_send(message)
     }
 
-    pub fn send(&mut self, topic: &str, event: EventKind, message: &Value) -> Result<(u32), MessageError> {
+    pub fn send(&mut self, topic: &str, event: EventKind, message: &Value) -> Result<u32, MessageError> {
         let phx_message = json!([(), self.message_ref, topic, event, message]);
 
         let serialised = serde_json::to_string(&phx_message)?;
@@ -66,7 +66,7 @@ impl Sender {
         self.actually_send(message)
     }
 
-    fn actually_send(&mut self, message: OwnedMessage) -> Result<(u32), MessageError> {
+    fn actually_send(&mut self, message: OwnedMessage) -> Result<u32, MessageError> {
         self.message_ref += 1;
 
         let writer = self.writer.clone();
