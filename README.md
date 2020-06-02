@@ -17,46 +17,47 @@ processed incoming messages. This allows for messages to be received in a separa
 An very basic example of connecting with the `Client`:
 
 ```rust
-extern crate futures;
 extern crate tokio_core;
 extern crate phoenix_channels;
 
 use std::thread;
 use std::time::Duration;
-use futures::stream::Stream;
 use tokio_core::reactor::Core;
 use serde_json::json;
+use websocket::futures::Stream;
 
 use phoenix_channels::client;
 use phoenix_channels::client::ClientSender;
 use phoenix_channels::event;
 
-let url = "ws://localhost:4000/socket";
+fn main() {
+    let url = "ws://localhost:4000/socket";
 
-let token = "abcde12345";
-let params = vec![("token", token)];
+    let token = "abcde12345";
+    let params = vec![("token", token)];
 
-let (client, messages) = client::Client::new(url, params, None).unwrap();
+    let (mut client, messages) = client::Client::new(url, params, None).unwrap();
 
-let topic = "room:lobby";
-client.join(topic).unwrap();
+    let topic = "room:lobby";
+    client.join(topic).unwrap();
 
-thread::spawn(move || {
-  loop {
-    thread::sleep(Duration::from_secs(10));
-    let msg = json!({"id": 1});
-    client.send(topic, event::EventKind::Custom(String::from("shout")), &msg);
-  }
-});
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_secs(10));
+            let msg = json!({"id": 1});
+            client.send(topic, event::EventKind::Custom(String::from("shout")), &msg);
+        }
+    });
 
-let runner = messages.for_each(|message| {
-  println!("{:?}", message);
+    let runner = messages.for_each(|message| {
+        println!("{:?}", message);
 
-  Ok(())
-});
+        Ok(())
+    });
 
-let mut core = Core::new().unwrap();
-core.run(runner).unwrap();
+    let mut core = Core::new().unwrap();
+    core.run(runner).unwrap();
+}
 ```
 
 The client itself will handle the heartbeat and anything else required to deliver a serde json struct
@@ -75,60 +76,62 @@ actually uses these under the hood).
 Here is an example of how one can use the `Sender`/`Receiver` structs themselves:
 
 ```rust
-extern crate futures;
 extern crate tokio_core;
 extern crate phoenix_channels;
 
 use std::thread;
 use std::time::Duration;
-use futures::stream::Stream;
+use websocket::futures::Stream;
+use std::sync::{Arc, Mutex};
 use tokio_core::reactor::Core;
 use serde_json::json;
 
 use phoenix_channels::client;
 use phoenix_channels::event;
 
-let url = "ws://localhost:4000/socket";
+fn main() {
+    let url = "ws://localhost:4000/socket";
 
-let token = "abcde12345";
-let params = vec![("token", token)];
+    let token = "abcde12345";
+    let params = vec![("token", token)];
 
-let (mut sender, receiver) = client::connect(url, params, None).unwrap();
+    let (mut sender, receiver) = client::connect(url, params, None).unwrap();
 
-let topic = "room:lobby";
-sender.join(topic).unwrap();
+    let topic = "room:lobby";
+    sender.join(topic).unwrap();
 
-let sender_ref = Arc::new(Mutex::new(sender));
-let sender_heartbeat = Arc::clone(&sender_ref);
-let sender_send = Arc::clone(&sender_ref);
+    let sender_ref = Arc::new(Mutex::new(sender));
+    let sender_heartbeat = Arc::clone(&sender_ref);
+    let sender_send = Arc::clone(&sender_ref);
 
-thread::spawn(move || {
-  loop {
-      thread::sleep(Duration::from_secs(2));
-      // if the mutex is poisoned then the whole thread wont work
-      let mut sender = sender_heartbeat.lock().unwrap();
-      sender.heartbeat().expect("could not send heartbeat");
-  }
-});
+    thread::spawn(move || {
+    loop {
+        thread::sleep(Duration::from_secs(2));
+        // if the mutex is poisoned then the whole thread wont work
+        let mut sender = sender_heartbeat.lock().unwrap();
+        sender.heartbeat().expect("could not send heartbeat");
+    }
+    });
 
-thread::spawn(move || {
-  loop {
-      thread::sleep(Duration::from_secs(10));
-      // if the mutex is poisoned then the whole thread wont work
-      let msg = json!({"id": 1});
-      let mut sender = sender_send.lock().unwrap();
-      sender.send(topic, event::EventKind::Custom(String::from("shout")), &msg).expect("could not send message");
-  }
-});
+    thread::spawn(move || {
+    loop {
+        thread::sleep(Duration::from_secs(10));
+        // if the mutex is poisoned then the whole thread wont work
+        let msg = json!({"id": 1});
+        let mut sender = sender_send.lock().unwrap();
+        sender.send(topic, event::EventKind::Custom(String::from("shout")), &msg).expect("could not send message");
+    }
+    });
 
-let runner = receiver.reader.for_each(|message| {
-  println!("{:?}", message);
+    let runner = receiver.reader.for_each(|message| {
+    println!("{:?}", message);
 
-  Ok(())
-});
+    Ok(())
+    });
 
-let mut core = Core::new().unwrap();
-core.run(runner).unwrap();
+    let mut core = Core::new().unwrap();
+    core.run(runner).unwrap();
+}
 ```
 
 Using the lower level API requires more work but it gives you full control over the threading and flow of
